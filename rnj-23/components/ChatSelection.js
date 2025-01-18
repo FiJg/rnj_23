@@ -1,4 +1,3 @@
-// ChatSelection.js
 import React, { useEffect, useState } from 'react';
 import {
   View,
@@ -9,7 +8,6 @@ import {
   Alert,
   ActivityIndicator,
 } from 'react-native';
-import Dialog from 'react-native-dialog'; // Import Dialog
 
 const LOCALHOST_URL = 'http://172.22.2.61:8082';
 
@@ -25,9 +23,6 @@ const ChatSelection = ({
   setIsLoading,
 }) => {
   const [rooms, setChatRooms] = useState([]);
-  const [showCreateDialog, setShowCreateDialog] = useState(false);
-  const [groupName, setGroupName] = useState('');
-  const [groupUsers, setGroupUsers] = useState('');
 
   useEffect(() => {
     fetchChatRooms();
@@ -58,42 +53,32 @@ const ChatSelection = ({
     } catch (error) {
       console.error('Error fetching chat rooms:', error);
       setIsLoading(false);
-      Alert.alert('Error', 'Failed to fetch chat rooms.');
     }
   };
 
   const addGroupChat = () => {
-    setShowCreateDialog(true);
-  };
+    const name = prompt('Enter the name of the group chat');
+    const users = prompt('Enter the usernames of users to add, separated by commas');
 
-  const handleCreateGroup = () => {
-    if (!groupName.trim() || !groupUsers.trim()) {
+    if (!name || !users) {
       Alert.alert('Validation Error', 'Group chat name and users are required.');
       return;
     }
 
-    const userArray = groupUsers.split(',').map((u) => u.trim());
+    const userArray = users.split(',').map((u) => u.trim());
 
     fetch(`${LOCALHOST_URL}/api/chatroom/create`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        name: groupName.trim(),
+        name: name.trim(),
         isGroup: true,
         joinedUserNames: userArray,
         createdBy: user.id,
       }),
     })
-      .then(() => {
-        setShowCreateDialog(false);
-        setGroupName('');
-        setGroupUsers('');
-        fetchChatRooms();
-      })
-      .catch((error) => {
-        console.error('Error creating group chat:', error);
-        Alert.alert('Error', 'Failed to create group chat.');
-      });
+      .then(() => fetchChatRooms())
+      .catch((error) => console.error('Error creating group chat:', error));
   };
 
   const renderChatRoom = ({ item }) => {
@@ -125,42 +110,18 @@ const ChatSelection = ({
 
   return (
     <View style={styles.container}>
-      {/* Header Section */}
       <View style={styles.header}>
         <Text style={styles.headerText}>ChatRooms</Text>
         <TouchableOpacity style={styles.addButton} onPress={addGroupChat}>
           <Text style={styles.addButtonText}>+ Add Group</Text>
         </TouchableOpacity>
       </View>
-
-      {/* Chat Rooms List */}
       <FlatList
         data={rooms}
         keyExtractor={(item) => item.id.toString()}
         renderItem={renderChatRoom}
         contentContainerStyle={styles.list}
       />
-
-      {/* Create Group Chat Dialog */}
-      <Dialog.Container visible={showCreateDialog}>
-        <Dialog.Title>Create Group Chat</Dialog.Title>
-        <Dialog.Description>
-          Enter the group name and the usernames to add (separated by commas).
-        </Dialog.Description>
-        <Dialog.Input
-          label="Group Name"
-          value={groupName}
-          onChangeText={setGroupName}
-        />
-        <Dialog.Input
-          label="Usernames"
-          value={groupUsers}
-          onChangeText={setGroupUsers}
-          placeholder="user1, user2, user3"
-        />
-        <Dialog.Button label="Cancel" onPress={() => setShowCreateDialog(false)} />
-        <Dialog.Button label="Create" onPress={handleCreateGroup} />
-      </Dialog.Container>
     </View>
   );
 };
@@ -170,7 +131,6 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: '#d0d0d0',
     padding: 16,
-    width: '100%', // Ensure it takes full width within the drawer
   },
   header: {
     flexDirection: 'row',
@@ -178,7 +138,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginBottom: 16,
   },
-  
   headerText: {
     fontSize: 18,
     fontWeight: 'bold',
@@ -186,20 +145,19 @@ const styles = StyleSheet.create({
   },
   addButton: {
     paddingVertical: 8,
-    paddingHorizontal: 12,
+    paddingHorizontal: 16,
     backgroundColor: '#0066ff',
     borderRadius: 5,
   },
   addButtonText: {
     color: '#fff',
     fontWeight: 'bold',
-    fontSize: 14,
   },
   list: {
     paddingBottom: 16,
   },
   chatRoom: {
-    padding: 12,
+    padding: 16,
     backgroundColor: '#fff',
     borderRadius: 5,
     marginBottom: 8,

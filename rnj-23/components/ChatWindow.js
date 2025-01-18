@@ -18,7 +18,7 @@ const getAvatarUrl = (username) => `${LOCALHOST_URL}/uploads/avatars/${username}
 import axios from 'axios';
 
 
-const ChatWindow = ({ user, activeChat, privateChats, sendMessage, stompClient }) => {
+const ChatWindow = ({ user, activeChat, privateChats, setPrivateChats, sendMessage, stompClient }) => {
   const [message, setMessage] = useState('');
   const [file, setFile] = useState(null);
   const [failedAvatars, setFailedAvatars] = useState(new Set());
@@ -74,7 +74,7 @@ const ChatWindow = ({ user, activeChat, privateChats, sendMessage, stompClient }
         fileType: fileType,
         fileSize: file ? file.size : null,
       },
-      date: new Date().getTime(),
+      date: Date.now(),
     };
 
     console.log('Sending Payload:', payload);
@@ -84,6 +84,19 @@ const ChatWindow = ({ user, activeChat, privateChats, sendMessage, stompClient }
       await sendMessage(payload);
       setMessage('');
       setFile(null);
+      
+      setPrivateChats(prevChats => {
+        const updatedChats = new Map(prevChats);
+        const chatMessages = updatedChats.get(activeChat.id) || [];
+        updatedChats.set(activeChat.id, [...chatMessages, payload]);
+        return updatedChats;
+      });
+  
+      // **Scroll to end after sending**
+      if (flatListRef.current) {
+        flatListRef.current.scrollToEnd({ animated: true });
+      }
+
     } catch (error) {
       console.error('Error sending message:', error);
     }
@@ -100,7 +113,12 @@ const ChatWindow = ({ user, activeChat, privateChats, sendMessage, stompClient }
           setPrivateChats(prevChats => {
             const updatedChats = new Map(prevChats);
             const chatMessages = updatedChats.get(activeChat.id) || [];
-            updatedChats.set(activeChat.id, [...chatMessages, newMessage]);
+
+
+            const exists = chatMessages.some(msg => msg.id === newMessage.id);
+            if (!exists) {
+              updatedChats.set(activeChat.id, [...chatMessages, newMessage]);
+            }
             return updatedChats;
           });
         }
@@ -112,8 +130,20 @@ const ChatWindow = ({ user, activeChat, privateChats, sendMessage, stompClient }
     }
   }, [stompClient, activeChat]);
  
+useEffect(() => {
+  console.log('ChatWindow Props:', { user, activeChat, privateChats, setPrivateChats, sendMessage, stompClient });
+}, [user, activeChat, privateChats, setPrivateChats, sendMessage, stompClient]);
+
   //avatars fucntions
   const renderAvatar = (username) => {
+    if (!username) {
+      return (
+        <View style={styles.avatarPlaceholder}>
+          <Text style={styles.avatarText}>?</Text> {/* Default placeholder */}
+        </View>
+      );
+    }
+  
     if (!failedAvatars.has(username)) {
       return (
         <Image
@@ -123,16 +153,15 @@ const ChatWindow = ({ user, activeChat, privateChats, sendMessage, stompClient }
         />
       );
     }
-
-    // intials fallback
+  
+    // Fallback to initials
     return (
       <View style={styles.avatarPlaceholder}>
-        <Text style={styles.avatarText}>
-          {username.charAt(0).toUpperCase()}
-        </Text>
+        <Text style={styles.avatarText}>{username.charAt(0).toUpperCase()}</Text>
       </View>
     );
   };
+  
 
   const pickFile = async () => {
     // Request media library permissions
@@ -165,56 +194,72 @@ const ChatWindow = ({ user, activeChat, privateChats, sendMessage, stompClient }
     const isSender = item.username === user.username;
   
     const formatDate = (timestamp) => {
+      if (!timestamp) return 'No Date Available'; // Fallback for missing timestamps
+    
       const date = new Date(timestamp);
-      return date.toLocaleString(); 
+      if (isNaN(date.getTime())) return 'Invalid Date'; // Fallback for invalid dates
+    
+      return date.toLocaleString(); // Format the valid date
     };
-
+    
+  
     return (
       <View
         style={[
           styles.messageRow,
           isSender ? styles.messageRowRight : styles.messageRowLeft,
         ]}
-      > 
-       {!isSender && (
-        <View style={styles.avatarContainer}>
-          {renderAvatar(item.username)}
-        </View>
-      )}
-
-      <View
-        style={[
-          styles.messageContentContainer,
-          isSender ? styles.senderMessage : styles.receiverMessage,
-        ]}
       >
+        {!isSender && (
+          <View style={styles.avatarContainer}>
+            {renderAvatar(item.username || 'Unknown')}
+          </View>
+        )}
+  
+        <View
+          style={[
+            styles.messageContentContainer,
+            isSender ? styles.senderMessage : styles.receiverMessage,
+          ]}
+        >
+          <Text style={styles.username}>{isSender ? 'You' : item.username || 'Unknown'}</Text>
+          <Text style={styles.timestamp}>{formatDate(item.date || item.sendTime)}</Text>
 
-        <Text style={styles.username}>{isSender ? 'You' : item.username || 'Unknown'}</Text>
-        <Text style={styles.timestamp}>{formatDate(item.sendTime)}</Text>
-        <Text style={styles.messageText}>{item.content || ''}</Text>
-        {item.fileUrl && item.fileType?.startsWith('image/') && (
-          <Image
-          source={{ uri: `${LOCALHOST_URL}/uploads/${item.fileUrl}` }}
-          style={styles.messageImage}
-        />
-      )}
-        {item.fileUrl && !item.fileType?.startsWith('image/') && (
-          <TouchableOpacity
-            onPress={() => Alert.alert('Download', 'Download not implemented yet.')}
-          >
-             <Text style={styles.downloadText}>Download {item.fileName}</Text>
-          </TouchableOpacity>
+  
+          {/* Render message content */}
+          {typeof item.content === 'string' ? (
+            <Text style={styles.messageText}>{item.content}</Text>
+          ) : item.content && typeof item.content.content === 'string' ? (
+            <Text style={styles.messageText}>{item.content.content}</Text>
+          ) : (
+            <Text style={styles.messageTextError}>Invalid content</Text>
+          )}
+  
+          {item.fileUrl && item.fileType?.startsWith('image/') && (
+            <Image
+              source={{ uri: `${LOCALHOST_URL}/uploads/${item.fileUrl}` }}
+              style={styles.messageImage}
+            />
+          )}
+  
+          {item.fileUrl && !item.fileType?.startsWith('image/') && (
+            <TouchableOpacity
+              onPress={() => Alert.alert('Download', 'Download not implemented yet.')}
+            >
+              <Text style={styles.downloadText}>Download {item.fileName}</Text>
+            </TouchableOpacity>
+          )}
+        </View>
+  
+        {isSender && (
+          <View style={styles.avatarContainer}>
+            {renderAvatar(user.username)}
+          </View>
         )}
       </View>
-
-      {isSender && (
-        <View style={styles.avatarContainer}>
-          {renderAvatar(user.username)}
-        </View>
-      )}
-    </View>
-  );
-};
+    );
+  };
+  
 
   useEffect(() => {
     if (flatListRef.current) {
@@ -235,13 +280,16 @@ const ChatWindow = ({ user, activeChat, privateChats, sendMessage, stompClient }
       style={styles.container}
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
     >
-      <FlatList
-        ref={flatListRef}
-        data={messages}
-        keyExtractor={(item, index) => `${item.id}-${index}`}
-        renderItem={renderMessage}
-        contentContainerStyle={styles.messageList}
-      />
+<FlatList
+  ref={flatListRef}
+  data={messages.filter(
+    (msg) => msg && typeof msg === 'object' && (typeof msg.content === 'string' || (msg.content && typeof msg.content.content === 'string'))
+  )}
+  keyExtractor={(item, index) => (item.id ? item.id.toString() : `message-${index}`)}
+  renderItem={renderMessage}
+  contentContainerStyle={styles.messageList}
+/>
+
       <View style={styles.inputContainer}>
         <TouchableOpacity onPress={pickFile} style={styles.attachButton}>
           <Ionicons name="attach" size={24} color="#0066ff" />

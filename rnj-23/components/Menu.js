@@ -1,24 +1,21 @@
+// Menu.js
 import React, { useEffect, useLayoutEffect, useState, useRef } from 'react';
 import { 
   View, 
   StyleSheet, 
   TouchableOpacity, 
-  Text, 
+  Alert, 
   Animated, 
-  Dimensions,
-  Alert 
+  Dimensions 
 } from 'react-native';
 import ChatSelection from './ChatSelection'; 
 import ChatWindow from './ChatWindow'; 
 import SockJS from 'sockjs-client';
 import { Client } from '@stomp/stompjs';
 import { Ionicons } from '@expo/vector-icons';
-
 import axios from 'axios';
 
-let stompClient = null;
 const LOCALHOST_URL = 'http://172.22.2.61:8082';
-
 const { width } = Dimensions.get('window');
 const CHAT_SELECTION_WIDTH = width * 0.8; 
 
@@ -28,10 +25,98 @@ const Menu = ({ user }) => {
   const [privateChats, setPrivateChats] = useState(new Map());
   const [isLoading, setIsLoading] = useState(true);
 
-  //for slide out chat selection
+  // For slide-out chat selection
   const [isChatSelectionVisible, setIsChatSelectionVisible] = useState(false);
   const slideAnim = useRef(new Animated.Value(-CHAT_SELECTION_WIDTH)).current;
 
+  // Use useRef to store the stompClient instance
+  const stompClientRef = useRef(null);
+
+  // Initialize stompClient only once
+  useEffect(() => {
+    const sock = new SockJS(`${LOCALHOST_URL}/ws`);
+    const client = new Client({
+      webSocketFactory: () => sock,
+      debug: (str) => console.log('STOMP Debug:', str),
+      onConnect: () => {
+        console.log('STOMP Connected');
+
+        // Subscribe to user notifications
+        client.subscribe(`/user/${user.username}/notifications`, (message) => {
+          const notification = JSON.parse(message.body);
+          const chatId = notification.chatRoomId;
+
+          // Set notifications for chats not currently active
+          setNotifications((prev) => {
+            if (activeChat && chatId === activeChat.id) {
+              return prev;
+            }
+            return { ...prev, [chatId]: true };
+          });
+        });
+
+        // Subscribe to active chat messages
+        if (activeChat) {
+          client.subscribe(`/topic/chatroom/${activeChat.id}`, (message) => {
+            const newMessage = JSON.parse(message.body);
+            console.log('Received Message:', newMessage); 
+
+            setPrivateChats(prevChats => {
+              const updatedChats = new Map(prevChats);
+              const chatMessages = updatedChats.get(activeChat.id) || [];
+
+              // Prevent duplicate messages
+              const exists = chatMessages.some(msg => msg.id === newMessage.id);
+              if (!exists) {
+                updatedChats.set(activeChat.id, [...chatMessages, newMessage]);
+              }
+
+              return updatedChats;
+            });
+          });
+        }
+      },
+      onStompError: (frame) => {
+        console.error('STOMP Error:', frame);
+        Alert.alert('Error', 'WebSocket connection error.');
+      },
+    });
+
+    stompClientRef.current = client;
+    client.activate();
+
+    // Cleanup on unmount
+    return () => {
+      if (client && client.active) {
+        client.deactivate();
+      }
+    };
+  }, [user.username]);
+
+  // Handle subscriptions when activeChat changes
+  useEffect(() => {
+    const client = stompClientRef.current;
+    if (client && client.connected && activeChat) {
+      // Subscribe to the new active chat
+      client.subscribe(`/topic/chatroom/${activeChat.id}`, (message) => {
+        const newMessage = JSON.parse(message.body);
+        console.log('Received Message:', newMessage); 
+
+        setPrivateChats(prevChats => {
+          const updatedChats = new Map(prevChats);
+          const chatMessages = updatedChats.get(activeChat.id) || [];
+
+          // Prevent duplicate messages
+          const exists = chatMessages.some(msg => msg.id === newMessage.id);
+          if (!exists) {
+            updatedChats.set(activeChat.id, [...chatMessages, newMessage]);
+          }
+
+          return updatedChats;
+        });
+      });
+    }
+  }, [activeChat]);
 
   const handleChatChange = async (newChatId) => {
     if (!newChatId || activeChat?.id === newChatId) {
@@ -53,49 +138,6 @@ const Menu = ({ user }) => {
     }
   };
 
-  useLayoutEffect(() => {
-    return () => {
-      if (stompClient && stompClient.active) {
-        stompClient.deactivate();
-      }
-    };
-  }, []);
-
-  useEffect(() => {
-    const sock = new SockJS(`${LOCALHOST_URL}/ws`);
-    stompClient = new Client({
-      webSocketFactory: () => sock,
-      debug: (str) => console.log(str),
-      onConnect: () => {
-        stompClient.subscribe(`/user/${user.username}/notifications`, (message) => {
-          const notification = JSON.parse(message.body);
-          const chatId = notification.chatRoomId;
-
-          // Set notifications for chats not currently active
-          setNotifications((prev) => {
-            if (activeChat && chatId === activeChat.id) {
-              return prev;
-            }
-            return { ...prev, [chatId]: true };
-          });
-        });
-      },
-      onStompError: (frame) => {
-        console.error('STOMP error:', frame);
-        Alert.alert('Error', 'WebSocket connection error.');
-      },
-    });
-
-    stompClient.activate();
-
-    return () => {
-      if (stompClient && stompClient.active) {
-        stompClient.deactivate();
-      }
-    };
-  }, [activeChat, user.username]);
-
-
   const checkReceivedMessages = async () => {
     if (isLoading) return;
 
@@ -112,6 +154,7 @@ const Menu = ({ user }) => {
       });
 
       setPrivateChats(updatedChats);
+      setIsLoading(false);
     } catch (error) {
       console.error('Error fetching messages:', error);
       Alert.alert('Error', 'Failed to fetch messages.');
@@ -133,9 +176,11 @@ const Menu = ({ user }) => {
       ? '/app/group-message'
       : '/app/private-message';
   
-    if (stompClient && stompClient.connected) {
+    const client = stompClientRef.current;
+  
+    if (client && client.connected) {
       try {
-        stompClient.publish({ destination, body: JSON.stringify(payload) });
+        client.publish({ destination, body: JSON.stringify(payload) });
         console.log('Message sent successfully:', payload);
       } catch (error) {
         console.error('Error in stompClient.publish:', error);
@@ -148,7 +193,7 @@ const Menu = ({ user }) => {
 
   const toggleChatSelection = () => {
     if (isChatSelectionVisible) {
-      // hiding menu
+      // Hiding menu
       Animated.timing(slideAnim, {
         toValue: -CHAT_SELECTION_WIDTH,
         duration: 300,
@@ -157,7 +202,7 @@ const Menu = ({ user }) => {
         setIsChatSelectionVisible(false);
       });
     } else {
-      // shwo menu
+      // Show menu
       setIsChatSelectionVisible(true);
       Animated.timing(slideAnim, {
         toValue: 0,
@@ -168,8 +213,6 @@ const Menu = ({ user }) => {
   };
  
 
-
-
   return (
     <View style={styles.container}>
       {/* Toggle Button */}
@@ -177,7 +220,7 @@ const Menu = ({ user }) => {
         <Ionicons name="menu" size={24} color="#fff" />
       </TouchableOpacity>
 
-    {/* Overlay when menu is open */}
+      {/* Overlay when menu is open */}
       {isChatSelectionVisible && (
         <TouchableOpacity
           style={styles.overlay}
@@ -191,7 +234,7 @@ const Menu = ({ user }) => {
         <Animated.View style={[styles.chatSelectionDrawer, { transform: [{ translateX: slideAnim }] }]}>
           <ChatSelection
             activeChat={activeChat}
-            setActiveChat={setActiveChat}
+            setActiveChat={handleChatChange}
             handleChatChange={handleChatChange}
             user={user}
             notifications={notifications}
@@ -203,15 +246,15 @@ const Menu = ({ user }) => {
         </Animated.View>
       )}
 
-     
-
       {/* ChatWindow Component */}
       <View style={styles.chatWindowContainer}>
         <ChatWindow
           activeChat={activeChat}
           user={user}
           privateChats={privateChats}
+          setPrivateChats={setPrivateChats}
           sendMessage={sendMessage}
+          stompClient={stompClientRef.current} // Pass the current stompClient
         />
       </View>
     </View>
@@ -247,8 +290,7 @@ const styles = StyleSheet.create({
   },
   chatWindowContainer: {
     flex: 1,
-    // Adjust marginLeft if you want the ChatWindow to shift when the drawer is open
-    // For simplicity, we're keeping it full-screen and overlaying the drawer
+    // Keeps ChatWindow full-screen, overlays with drawer
   },
   overlay: {
     position: 'absolute',
@@ -257,7 +299,7 @@ const styles = StyleSheet.create({
     width: width - CHAT_SELECTION_WIDTH, // Covers the rest of the screen
     height: '100%',
     backgroundColor: 'rgba(0,0,0,0.3)',
-    zIndex: 1, // less than drawer
+    zIndex: 1, // Below drawer
   },
 });
 
