@@ -39,39 +39,13 @@ const ChatWindow = ({ user, activeChat, privateChats, setPrivateChats, sendMessa
       }
     }, [privateChats, activeChat]);
 
-  
-  // websockett subscription for new messages
+     // Scroll to end when messages change
   useEffect(() => {
-    if (stompClient && activeChat) {
-      const subscription = stompClient.subscribe(
-        `/topic/chatroom/${activeChat.id}`,
-        (message) => {
-          const newMessage = JSON.parse(message.body);
-          console.log('Received Message:', newMessage); 
-         
-          // gotta update both privateChats and local messages
-          setPrivateChats(prevChats => {
-            const updatedChats = new Map(prevChats);
-            const chatMessages = updatedChats.get(activeChat.id) || [];
-            const exists = chatMessages.some(msg => msg.id === newMessage.id);
-           
-            if (!exists) {
-              const updatedMessages = [...chatMessages, newMessage];
-              updatedChats.set(activeChat.id, updatedMessages);
-              setMessages(updatedMessages); // Update local messages state
-            }
-            return updatedChats;
-          });
-        }
-      );
-
-      return () => {
-        subscription.unsubscribe();
-      };
+    if (flatListRef.current) {
+      flatListRef.current.scrollToEnd({ animated: true });
     }
-  }, [stompClient, activeChat]);
- 
-
+  }, [messages]);
+  
   const handleAvatarError = (username) => {
     setFailedAvatars((prev) => new Set([...prev, username]));
   };
@@ -108,7 +82,6 @@ const ChatWindow = ({ user, activeChat, privateChats, setPrivateChats, sendMessa
         return;
       }
     }
-
     // **Construct the payload with senderId and chatId at the top level**
     const payload = {
       senderId: user.id,
@@ -151,37 +124,32 @@ const ChatWindow = ({ user, activeChat, privateChats, setPrivateChats, sendMessa
     }
   };
 
-useEffect(() => {
-  console.log('ChatWindow Props:', { user, activeChat, privateChats, setPrivateChats, sendMessage, stompClient });
-}, [user, activeChat, privateChats, setPrivateChats, sendMessage, stompClient]);
-
-
-const handleDownload = async (fileUrl, fileName) => {
-  try {
-    setDownloading(true);
-    const downloadUri = `${FileSystem.documentDirectory}${fileName}`;
-    
-    // Download the file
-    const { uri } = await FileSystem.downloadAsync(fileUrl, downloadUri);
-    console.log('Finished downloading to ', uri);
-
-    // Check if sharing is available
-    const isAvailable = await Sharing.isAvailableAsync();
-    if (isAvailable) {
-      await Sharing.shareAsync(uri);
-    } else {
-      Alert.alert('Download', `File downloaded to: ${uri}`);
+  const handleDownload = async (fileUrl, fileName) => {
+    try {
+      setDownloading(true);
+      const downloadUri = `${FileSystem.documentDirectory}${fileName}`;
+      
+      // Download the file
+      const { uri } = await FileSystem.downloadAsync(fileUrl, downloadUri);
+      console.log('Finished downloading to ', uri);
+  
+      // Check if sharing is available
+      const isAvailable = await Sharing.isAvailableAsync();
+      if (isAvailable) {
+        await Sharing.shareAsync(uri);
+      } else {
+        Alert.alert('Download', `File downloaded to: ${uri}`);
+      }
+    } catch (error) {
+      console.error('Error downloading file:', error);
+      Alert.alert('Download Error', 'Failed to download the file.');
+    } finally {
+      setDownloading(false);
     }
-  } catch (error) {
-    console.error('Error downloading file:', error);
-    Alert.alert('Download Error', 'Failed to download the file.');
-  } finally {
-    setDownloading(false);
-  }
-};
-
-  //avatars fucntions
-  const renderAvatar = (username) => {
+  };
+  
+   //avatars fucntions
+   const renderAvatar = (username) => {
     if (!username) {
       return (
         <View style={styles.avatarPlaceholder}>
@@ -235,6 +203,8 @@ const handleDownload = async (fileUrl, fileName) => {
       });
     }
   };
+
+
 
   const renderMessage = ({ item }) => {
     const isSender = item.username === user.username;
@@ -327,6 +297,61 @@ const handleDownload = async (fileUrl, fileName) => {
   };
   
 
+  // websockett subscription for new messages
+  useEffect(() => {
+    if (stompClient && activeChat) {
+      const subscription = stompClient.subscribe(
+        `/topic/chatroom/${activeChat.id}`,
+        (message) => {
+          const newMessage = JSON.parse(message.body);
+          console.log('Received Message:', newMessage); 
+         
+          // gotta update both privateChats and local messages
+
+          // Check if the message is from the current user
+          const isFromCurrentUser = newMessage.username === user.username;
+
+          if (!isFromCurrentUser) {
+              setPrivateChats(prevChats => {
+                const chatMessages = prevChats.get(activeChat.id) || [];
+                const exists = chatMessages.some(msg => 
+                  (msg.id && msg.id === newMessage.id) || 
+                  (msg.date && msg.date === newMessage.date)
+                );
+
+                if (!exists) {
+                  const updatedMessages = [...chatMessages, newMessage];
+                  const updatedChats = new Map(prevChats);
+                  updatedChats.set(activeChat.id, updatedMessages);
+                  setMessages(updatedMessages); // Update local messages state
+                  return updatedChats;
+                }
+                return updatedChats;
+              });
+           }
+      }
+      );
+
+      return () => {
+        subscription.unsubscribe();
+      };
+    }
+  }, [stompClient, activeChat, user.username]);
+ 
+
+  
+
+
+
+useEffect(() => {
+  console.log('ChatWindow Props:', { user, activeChat, privateChats, setPrivateChats, sendMessage, stompClient });
+}, [user, activeChat, privateChats, setPrivateChats, sendMessage, stompClient]);
+
+
+
+ 
+
+
   const getUTCOffset = (date) => {
     const offsetInMinutes = date.getTimezoneOffset();
     const absoluteOffset = Math.abs(offsetInMinutes);
@@ -385,30 +410,39 @@ const handleDownload = async (fileUrl, fileName) => {
       style={styles.container}
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
     >
-<FlatList
-  ref={flatListRef}
-  data={messages.filter(
-    (msg) => msg && typeof msg === 'object' && (typeof msg.content === 'string' || (msg.content && typeof msg.content.content === 'string'))
-  )}
-  keyExtractor={(item, index) => (item.id ? item.id.toString() : `message-${index}`)}
-  renderItem={renderMessage}
-  contentContainerStyle={styles.messageList}
-/>
+      { !activeChat ? (
+        <View style={styles.noChatContainer}>
+          <Text style={styles.noChatText}>No chat selected.</Text>
+        </View>
+      ) : (
+        <>
+          <FlatList
+            ref={flatListRef}
+            data={messages.filter(
+              (msg) => msg && typeof msg === 'object' && (typeof msg.content === 'string' || (msg.content && typeof msg.content.content === 'string'))
+            )}
+            keyExtractor={(item, index) => (item.id ? item.id.toString() : `message-${index}`)}
+            renderItem={renderMessage}
+            contentContainerStyle={styles.messageList}
+            onContentSizeChange={() => flatListRef.current.scrollToEnd({ animated: true })}
+          />
 
-      <View style={styles.inputContainer}>
-        <TouchableOpacity onPress={pickFile} style={styles.attachButton}>
-          <Ionicons name="attach" size={24} color="#0066ff" />
-        </TouchableOpacity>
-        <TextInput
-          style={styles.input}
-          placeholder="Write a message..."
-          value={message}
-          onChangeText={setMessage}
-        />
-        <TouchableOpacity style={styles.sendButton} onPress={handleSendMessage}>
-          <Text style={styles.sendButtonText}>Send</Text>
-        </TouchableOpacity>
-      </View>
+          <View style={styles.inputContainer}>
+            <TouchableOpacity onPress={pickFile} style={styles.attachButton}>
+              <Ionicons name="attach" size={24} color="#0066ff" />
+            </TouchableOpacity>
+            <TextInput
+              style={styles.input}
+              placeholder="Write a message..."
+              value={message}
+              onChangeText={setMessage}
+            />
+            <TouchableOpacity style={styles.sendButton} onPress={handleSendMessage}>
+              <Text style={styles.sendButtonText}>Send</Text>
+            </TouchableOpacity>
+          </View>
+        </>
+      )}
     </KeyboardAvoidingView>
   );
 };

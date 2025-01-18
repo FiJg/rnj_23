@@ -1,4 +1,3 @@
-// Menu.js
 import React, { useEffect, useLayoutEffect, useState, useRef } from 'react';
 import { 
   View, 
@@ -60,18 +59,19 @@ const Menu = ({ user }) => {
           client.subscribe(`/topic/chatroom/${activeChat.id}`, (message) => {
             const newMessage = JSON.parse(message.body);
             console.log('Received Message:', newMessage); 
-
+  
             setPrivateChats(prevChats => {
-              const updatedChats = new Map(prevChats);
-              const chatMessages = updatedChats.get(activeChat.id) || [];
-
-              // Prevent duplicate messages
+              const chatMessages = prevChats.get(activeChat.id) || [];
               const exists = chatMessages.some(msg => msg.id === newMessage.id);
+  
               if (!exists) {
-                updatedChats.set(activeChat.id, [...chatMessages, newMessage]);
+                const updatedMessages = [...chatMessages, newMessage];
+                const updatedChats = new Map(prevChats);
+                updatedChats.set(activeChat.id, updatedMessages);
+                return updatedChats;
               }
-
-              return updatedChats;
+  
+              return prevChats;
             });
           });
         }
@@ -82,8 +82,9 @@ const Menu = ({ user }) => {
       },
     });
 
-    stompClientRef.current = client;
     client.activate();
+    stompClientRef.current = client;
+   
 
     // Cleanup on unmount
     return () => {
@@ -96,25 +97,36 @@ const Menu = ({ user }) => {
   // Handle subscriptions when activeChat changes
   useEffect(() => {
     const client = stompClientRef.current;
+    let subscription = null;
+ 
     if (client && client.connected && activeChat) {
       // Subscribe to the new active chat
-      client.subscribe(`/topic/chatroom/${activeChat.id}`, (message) => {
+      subscription = client.subscribe(`/topic/chatroom/${activeChat.id}`, (message) => {
         const newMessage = JSON.parse(message.body);
         console.log('Received Message:', newMessage); 
 
         setPrivateChats(prevChats => {
-          const updatedChats = new Map(prevChats);
-          const chatMessages = updatedChats.get(activeChat.id) || [];
-
+          const chatMessages = prevChats.get(activeChat.id) || []; // Corrected here
           // Prevent duplicate messages
           const exists = chatMessages.some(msg => msg.id === newMessage.id);
+
           if (!exists) {
-            updatedChats.set(activeChat.id, [...chatMessages, newMessage]);
+            const updatedMessages = [...chatMessages, newMessage];
+            const updatedChats = new Map(prevChats);
+            updatedChats.set(activeChat.id, updatedMessages);
+            return updatedChats;
           }
 
-          return updatedChats;
+          return prevChats;
         });
       });
+    
+  // Cleanup: Unsubscribe from previous chat when activeChat changes
+      return () => {
+        if (subscription) {
+          subscription.unsubscribe();
+        }
+      };
     }
   }, [activeChat]);
 
@@ -132,6 +144,16 @@ const Menu = ({ user }) => {
         const updated = { ...prev, [newChatId]: false };
         return updated;
       });
+
+        // Optionally, fetch existing messages for the new chat
+        const existingMessages = result.messages || [];
+        setPrivateChats(prevChats => {
+          const updatedChats = new Map(prevChats);
+          updatedChats.set(newChatId, existingMessages);
+          return updatedChats;
+        });
+  
+        setIsLoading(false);
     } catch (error) {
       console.error('Error changing chat:', error);
       Alert.alert('Error', 'Failed to change chat.');
