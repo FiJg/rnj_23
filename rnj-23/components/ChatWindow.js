@@ -22,7 +22,7 @@ import * as Sharing from 'expo-sharing';
 import axios from 'axios';
 
 
-const ChatWindow = ({ user, activeChat, privateChats, setPrivateChats, sendMessage, stompClient }) => {
+const ChatWindow = ({ user, activeChat, privateChats, setPrivateChats, sendMessage, stompClient, isConnected, }) => {
   const [message, setMessage] = useState('');
   const [file, setFile] = useState(null);
   const [failedAvatars, setFailedAvatars] = useState(new Set());
@@ -298,45 +298,7 @@ const ChatWindow = ({ user, activeChat, privateChats, setPrivateChats, sendMessa
   
 
   // websockett subscription for new messages
-  useEffect(() => {
-    if (stompClient && activeChat) {
-      const subscription = stompClient.subscribe(
-        `/topic/chatroom/${activeChat.id}`,
-        (message) => {
-          const newMessage = JSON.parse(message.body);
-          console.log('Received Message:', newMessage); 
-         
-          // gotta update both privateChats and local messages
-
-          // Check if the message is from the current user
-          const isFromCurrentUser = newMessage.username === user.username;
-
-          if (!isFromCurrentUser) {
-              setPrivateChats(prevChats => {
-                const chatMessages = prevChats.get(activeChat.id) || [];
-                const exists = chatMessages.some(msg => 
-                  (msg.id && msg.id === newMessage.id) || 
-                  (msg.date && msg.date === newMessage.date)
-                );
-
-                if (!exists) {
-                  const updatedMessages = [...chatMessages, newMessage];
-                  const updatedChats = new Map(prevChats);
-                  updatedChats.set(activeChat.id, updatedMessages);
-                  setMessages(updatedMessages); // Update local messages state
-                  return updatedChats;
-                }
-                return updatedChats;
-              });
-           }
-      }
-      );
-
-      return () => {
-        subscription.unsubscribe();
-      };
-    }
-  }, [stompClient, activeChat, user.username]);
+ 
  
 
   
@@ -436,9 +398,14 @@ useEffect(() => {
               placeholder="Write a message..."
               value={message}
               onChangeText={setMessage}
+              editable={isConnected} 
             />
-            <TouchableOpacity style={styles.sendButton} onPress={handleSendMessage}>
-              <Text style={styles.sendButtonText}>Send</Text>
+            <TouchableOpacity 
+              style={[styles.sendButton, { opacity: isConnected ? 1 : 0.5 }]} 
+              onPress={handleSendMessage}
+              disabled={!isConnected} // Disable send button if not connected
+            >
+                <Text style={styles.sendButtonText}>Send</Text>
             </TouchableOpacity>
           </View>
         </>

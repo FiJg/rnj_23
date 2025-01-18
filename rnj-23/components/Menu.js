@@ -23,7 +23,7 @@ const Menu = ({ user }) => {
   const [activeChat, setActiveChat] = useState(null);
   const [privateChats, setPrivateChats] = useState(new Map());
   const [isLoading, setIsLoading] = useState(true);
-
+  const [isConnected, setIsConnected] = useState(false);
   // For slide-out chat selection
   const [isChatSelectionVisible, setIsChatSelectionVisible] = useState(false);
   const slideAnim = useRef(new Animated.Value(-CHAT_SELECTION_WIDTH)).current;
@@ -130,6 +130,25 @@ const Menu = ({ user }) => {
     }
   }, [activeChat]);
 
+// Add a new state to track connection status
+  useEffect(() => {
+    const client = stompClientRef.current;
+  
+    if (client) {
+      client.onConnect = () => {
+        console.log('STOMP Connected');
+        setIsConnected(true);
+        // Existing subscription logic
+      };
+  
+      client.onStompError = (frame) => {
+        console.error('STOMP Error:', frame);
+        Alert.alert('Error', 'WebSocket connection error.');
+        setIsConnected(false);
+      };
+    }
+  }, [user.username]);
+
   const handleChatChange = async (newChatId) => {
     if (!newChatId || activeChat?.id === newChatId) {
       return;
@@ -200,7 +219,7 @@ const Menu = ({ user }) => {
   
     const client = stompClientRef.current;
   
-    if (client && client.connected) {
+    if (client && client.active) {
       try {
         client.publish({ destination, body: JSON.stringify(payload) });
         console.log('Message sent successfully:', payload);
@@ -277,6 +296,7 @@ const Menu = ({ user }) => {
           setPrivateChats={setPrivateChats}
           sendMessage={sendMessage}
           stompClient={stompClientRef.current} // Pass the current stompClient
+          isConnected={isConnected} 
         />
       </View>
     </View>
