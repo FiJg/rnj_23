@@ -66,6 +66,7 @@ const ChatWindow = ({ user, activeChat, privateChats, setPrivateChats, sendMessa
     // **Construct the payload with senderId and chatId at the top level**
     const payload = {
       senderId: user.id,
+      username: user.username,
       chatId: activeChat.id,
       content: {
         content: message.trim(),
