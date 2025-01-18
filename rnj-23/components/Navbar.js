@@ -131,18 +131,8 @@ const Navbar = ({ user, unsetUserToken }) => {
         </View>
       ) : (
         <View style={styles.authButtons}>
-          <TouchableOpacity
-            style={[styles.button, styles.loginButton]}
-            onPress={() => Alert.alert('Login', 'Login screen not yet implemented.')}
-          >
-            <Text style={styles.buttonText}>Log In</Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={[styles.button, styles.signupButton]}
-            onPress={() => Alert.alert('Sign Up', 'Sign-up screen not yet implemented.')}
-          >
-            <Text style={styles.buttonText}>Sign Up</Text>
-          </TouchableOpacity>
+
+          
         </View>
       )}
     </View>

@@ -20,6 +20,7 @@ const styles = StyleSheet.create({
     flex: 1,
     width: '100%',
     backgroundColor: '#f5f5f5', 
+
   },
 });
 

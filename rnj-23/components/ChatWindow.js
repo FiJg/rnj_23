@@ -10,11 +10,15 @@ import {
   Alert,
   KeyboardAvoidingView,
   Platform,
+  ActivityIndicator,
 } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
 import { Ionicons } from '@expo/vector-icons';
 const LOCALHOST_URL = 'http://172.22.2.61:8082';
 const getAvatarUrl = (username) => `${LOCALHOST_URL}/uploads/avatars/${username}.png`;
+
+import * as FileSystem from 'expo-file-system';
+import * as Sharing from 'expo-sharing';
 import axios from 'axios';
 
 
@@ -22,10 +26,52 @@ const ChatWindow = ({ user, activeChat, privateChats, setPrivateChats, sendMessa
   const [message, setMessage] = useState('');
   const [file, setFile] = useState(null);
   const [failedAvatars, setFailedAvatars] = useState(new Set());
+  const [downloading, setDownloading] = useState(false);
   const flatListRef = useRef(null);
-
-  const messages = privateChats.get(activeChat?.id) || [];
+  const [messages, setMessages] = useState([]);
   
+
+    // Update local messages whenever privateChats changes
+    useEffect(() => {
+      if (activeChat?.id) {
+        const chatMessages = privateChats.get(activeChat.id) || [];
+        setMessages([...chatMessages]); // Create a new array to trigger re-render
+      }
+    }, [privateChats, activeChat]);
+
+  
+  // websockett subscription for new messages
+  useEffect(() => {
+    if (stompClient && activeChat) {
+      const subscription = stompClient.subscribe(
+        `/topic/chatroom/${activeChat.id}`,
+        (message) => {
+          const newMessage = JSON.parse(message.body);
+          console.log('Received Message:', newMessage); 
+         
+          // gotta update both privateChats and local messages
+          setPrivateChats(prevChats => {
+            const updatedChats = new Map(prevChats);
+            const chatMessages = updatedChats.get(activeChat.id) || [];
+            const exists = chatMessages.some(msg => msg.id === newMessage.id);
+           
+            if (!exists) {
+              const updatedMessages = [...chatMessages, newMessage];
+              updatedChats.set(activeChat.id, updatedMessages);
+              setMessages(updatedMessages); // Update local messages state
+            }
+            return updatedChats;
+          });
+        }
+      );
+
+      return () => {
+        subscription.unsubscribe();
+      };
+    }
+  }, [stompClient, activeChat]);
+ 
+
   const handleAvatarError = (username) => {
     setFailedAvatars((prev) => new Set([...prev, username]));
   };
@@ -89,7 +135,9 @@ const ChatWindow = ({ user, activeChat, privateChats, setPrivateChats, sendMessa
       setPrivateChats(prevChats => {
         const updatedChats = new Map(prevChats);
         const chatMessages = updatedChats.get(activeChat.id) || [];
-        updatedChats.set(activeChat.id, [...chatMessages, payload]);
+        const updatedMessages = [...chatMessages, payload];
+        updatedChats.set(activeChat.id, updatedMessages);
+        setMessages(updatedMessages); // Update local messages state
         return updatedChats;
       });
   
@@ -103,37 +151,34 @@ const ChatWindow = ({ user, activeChat, privateChats, setPrivateChats, sendMessa
     }
   };
 
-  // websockett subscription for new messages
-  useEffect(() => {
-    if (stompClient && activeChat) {
-      const subscription = stompClient.subscribe(
-        `/topic/chatroom/${activeChat.id}`,
-        (message) => {
-          const newMessage = JSON.parse(message.body);
-          console.log('Received Message:', newMessage); 
-          setPrivateChats(prevChats => {
-            const updatedChats = new Map(prevChats);
-            const chatMessages = updatedChats.get(activeChat.id) || [];
-
-
-            const exists = chatMessages.some(msg => msg.id === newMessage.id);
-            if (!exists) {
-              updatedChats.set(activeChat.id, [...chatMessages, newMessage]);
-            }
-            return updatedChats;
-          });
-        }
-      );
-
-      return () => {
-        subscription.unsubscribe();
-      };
-    }
-  }, [stompClient, activeChat]);
- 
 useEffect(() => {
   console.log('ChatWindow Props:', { user, activeChat, privateChats, setPrivateChats, sendMessage, stompClient });
 }, [user, activeChat, privateChats, setPrivateChats, sendMessage, stompClient]);
+
+
+const handleDownload = async (fileUrl, fileName) => {
+  try {
+    setDownloading(true);
+    const downloadUri = `${FileSystem.documentDirectory}${fileName}`;
+    
+    // Download the file
+    const { uri } = await FileSystem.downloadAsync(fileUrl, downloadUri);
+    console.log('Finished downloading to ', uri);
+
+    // Check if sharing is available
+    const isAvailable = await Sharing.isAvailableAsync();
+    if (isAvailable) {
+      await Sharing.shareAsync(uri);
+    } else {
+      Alert.alert('Download', `File downloaded to: ${uri}`);
+    }
+  } catch (error) {
+    console.error('Error downloading file:', error);
+    Alert.alert('Download Error', 'Failed to download the file.');
+  } finally {
+    setDownloading(false);
+  }
+};
 
   //avatars fucntions
   const renderAvatar = (username) => {
@@ -196,10 +241,15 @@ useEffect(() => {
   
     const formatDate = (timestamp) => {
       if (!timestamp) return 'No Date Available'; // Fallback for missing timestamps
-    
-      const date = new Date(timestamp);
+
+      // Determine if the timestamp is in seconds or milliseconds
+      const threshold = 946684800000; // Jan 1, 2000 in milliseconds
+      const isSeconds = timestamp < threshold / 1000;
+
+      const date = new Date(isSeconds ? timestamp * 1000 : timestamp);
+
       if (isNaN(date.getTime())) return 'Invalid Date'; // Fallback for invalid dates
-    
+
       return date.toLocaleString(); // Format the valid date
     };
     
@@ -245,12 +295,27 @@ useEffect(() => {
   
           {item.fileUrl && !item.fileType?.startsWith('image/') && (
             <TouchableOpacity
-              onPress={() => Alert.alert('Download', 'Download not implemented yet.')}
+              onPress={() => handleDownload(`${LOCALHOST_URL}/uploads/${item.fileUrl}`, item.fileName)}
+              style={styles.downloadButton}
             >
-              <Text style={styles.downloadText}>Download {item.fileName}</Text>
+              {downloading ? (
+                <ActivityIndicator size="small" color="#0066ff" />
+              ) : (
+                <Text style={styles.downloadText}>Download {item.fileName}</Text>
+              )}
             </TouchableOpacity>
-          )}
-        </View>
+         )}
+
+
+             {/* Display retrievedFromQueueTimestamp */}
+             {/* 
+            {item.retrievedFromQueueTimestamp && (
+              <Text style={styles.retrievedTimestamp}>
+                Retrieved from Queue:{' '}
+                {formatDateToLocal(item.retrievedFromQueueTimestamp)}
+              </Text>
+            )} */}
+      </View>
   
         {isSender && (
           <View style={styles.avatarContainer}>
@@ -261,6 +326,45 @@ useEffect(() => {
     );
   };
   
+
+  const getUTCOffset = (date) => {
+    const offsetInMinutes = date.getTimezoneOffset();
+    const absoluteOffset = Math.abs(offsetInMinutes);
+    const sign = offsetInMinutes <= 0 ? '+' : '-';
+    const hours = String(Math.floor(absoluteOffset / 60)).padStart(2, '0');
+    const minutes = String(absoluteOffset % 60).padStart(2, '0');
+    return `${sign}${hours}:${minutes}`;
+  };
+
+  const formatDateToLocal = (timestamp) => {
+    if (!timestamp) return 'Not Retrieved';
+  
+    // Determine if the timestamp is in seconds or milliseconds
+    // If it's less than a certain threshold (e.g., Jan 1, 2000), assume seconds
+    const threshold = 946684800000; // Jan 1, 2000 in milliseconds
+    const numericTimestamp = typeof timestamp === 'number' ? timestamp : parseInt(timestamp, 10);
+    const isSeconds = numericTimestamp < threshold / 1000;
+  
+    const date = new Date(isSeconds ? numericTimestamp * 1000 : numericTimestamp);
+  
+    if (isNaN(date.getTime())) return 'Invalid Date';
+  
+    const options = {
+      year: 'numeric',
+      month: 'numeric',
+      day: 'numeric',
+      hour: 'numeric',
+      minute: 'numeric',
+      second: 'numeric',
+      fractionalSecondDigits: 3,
+      hour12: false, // Ensures 24-hour format
+    };
+  
+    const formattedDate = date.toLocaleString(undefined, options);
+    const utcOffset = getUTCOffset(date);
+  
+    return `${formattedDate} UTC${utcOffset}`;
+  };
 
   useEffect(() => {
     if (flatListRef.current) {
@@ -433,6 +537,20 @@ const styles = StyleSheet.create({
   sendButtonText: {
     color: '#fff',
     fontWeight: 'bold',
+  },
+  downloadButton: {
+    marginTop: 5,
+    padding: 5,
+    alignItems: 'center',
+  },
+  downloadText: {
+    color: '#0066ff',
+    textDecorationLine: 'underline',
+  },
+  retrievedTimestamp: {
+    marginTop: 5,
+    fontSize: 10,
+    color: 'lightgray',
   },
 });
 

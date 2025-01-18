@@ -10,7 +10,7 @@ import {
 
 const LOGIN_URL = 'http://172.22.2.61:8082/login';
 
-const Login = ({ setUserToken, navigation }) => {
+const Login = ({ setUserToken}) => {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -47,8 +47,8 @@ const Login = ({ setUserToken, navigation }) => {
         Alert.alert('Error', 'Unexpected response from server.');
       }
     } catch (error) {
-      Alert.alert('Error', 'Failed to connect to the server.');
-      console.error('Fetch Error:', error);
+     // Alert.alert('Error', 'Failed to connect to the server.');
+     // console.error('Fetch Error:', error);
     } finally {
       setIsSubmitting(false);
     }
@@ -89,10 +89,7 @@ const Login = ({ setUserToken, navigation }) => {
         </Text>
       </TouchableOpacity>
 
-      {/* Signup Redirect */}
-      <TouchableOpacity onPress={() => navigation.navigate('Signup')}>
-        <Text style={styles.redirectText}>Don't have an account? Sign up</Text>
-      </TouchableOpacity>
+  
     </View>
   );
 };
